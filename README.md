@@ -2,7 +2,7 @@
 
 CurrenSee is an FX comparison dashboard for international students and expats who want to see the real cost of sending money abroad before choosing a provider.
 
-[Live demo](https://remit-radar.vercel.app)
+[Live demo](https://currensee-app.vercel.app)
 
 ![CurrenSee dashboard](public/currensee-dashboard.png)
 
