@@ -1,31 +1,61 @@
 # CurrenSee
 
-CurrenSee is a local-first FX comparison dashboard for international students who want to compare money transfer providers before sending funds abroad.
+CurrenSee is an FX comparison dashboard for international students and expats who want to see the real cost of sending money abroad before choosing a provider.
 
-The current build uses a hybrid quote adapter layer. Wise is connected through the public unauthenticated Wise Platform quote endpoint, Revolut is ready for live Business API quotes when a token is configured, and providers without public quote access use cached or manual fallback data.
+![CurrenSee dashboard](public/currensee-dashboard.png)
 
-The app does not move money or initiate transfers.
+## Why This Exists
+
+International transfers are hard to compare because providers split cost across exchange-rate spread, visible transfer fees, payment method fees, delivery speed, and quote freshness. CurrenSee normalizes those pieces into one ranked dashboard.
+
+The app does not move money, hold balances, or initiate transfers. It is a comparison and decision-support tool.
 
 ## Features
 
-- EUR, GBP, and USD to VND comparison routes
-- Live Wise quote adapter
-- Optional Revolut Business API quote adapter
-- Cached/manual fallback adapters for Remitly, TaptapSend, AIB, Bank of Ireland, and Permanent TSB
-- Ranked provider table based on payout, fee, speed, data freshness, and reliability
-- Fee breakdown and hidden FX cost estimate
-- Mid-market benchmark panel
-- Provider payout bar chart
-- Mock rate trend chart
-- Data quality and quote freshness badges
-- Watchlist panel prepared for future Firebase alerts
+- Multi-currency comparison across `EUR`, `GBP`, `USD`, `VND`, `INR`, `PHP`, `THB`, `CAD`, `AUD`, and `JPY`
+- Live Wise quote adapter using the unauthenticated Wise Platform quote endpoint
+- Optional Revolut Business API adapter via environment token
+- Cached or manual fallback adapters for Remitly, TaptapSend, AIB, Bank of Ireland, and Permanent TSB
+- Provider ranking by recipient payout, fee, speed, freshness, and reliability
+- Fee breakdown with effective rate, hidden FX cost, and spread against benchmark rate
+- Data quality labels: `Live API`, `Cached adapter`, `Partner access required`, and `Manual bank table`
+- Watchlist UI prepared for future Firebase alerts
+- Responsive dashboard UI built for desktop and mobile
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["Next.js dashboard"] --> API["/api/quotes"]
+  API --> Wise["Wise live adapter"]
+  API --> Revolut["Revolut adapter"]
+  API --> Fallback["Cached/manual adapters"]
+  Wise --> Normalize["Quote normalization"]
+  Revolut --> Normalize
+  Fallback --> Normalize
+  Normalize --> Rank["Ranking engine"]
+  Rank --> UI
+```
+
+## Provider Strategy
+
+CurrenSee uses a hybrid adapter design because not every fintech provider exposes public quote APIs.
+
+| Provider | Current integration | Notes |
+| --- | --- | --- |
+| Wise | Live API | Uses Wise unauthenticated quote flow. |
+| Revolut | Optional live API | Requires `REVOLUT_BUSINESS_API_TOKEN`. |
+| Remitly | Partner-access fallback | Public quote API access is not configured. |
+| TaptapSend | Partner-access fallback | Public quote API access is not configured. |
+| Irish banks | Manual table fallback | Useful for traditional-bank benchmarks. |
 
 ## Tech Stack
 
-- Next.js
+- Next.js App Router
 - TypeScript
 - Tailwind CSS
 - Lucide React icons
+- Vercel-ready API routes
 
 ## Local Development
 
@@ -38,24 +68,30 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment Variables
 
-Create `.env.local` when you want to enable optional live provider integrations:
+Wise live quotes work without local credentials in the current flow.
+
+Create `.env.local` if you want to enable optional Revolut quotes:
 
 ```bash
 REVOLUT_BUSINESS_API_TOKEN=
 REVOLUT_API_BASE_URL=https://b2b.revolut.com/api/1.0
 ```
 
-Wise live quotes do not require a token for the current unauthenticated quote flow.
+## Scripts
 
-## Future Firebase/Vercel Work
+```bash
+npm run dev
+npm run lint
+npm run build
+```
 
-Suggested next steps:
+## Future Work
 
-- Cache normalized provider quotes in Firestore
-- Store watchlist alerts in Firestore
-- Trigger quote refresh jobs with Firebase Cloud Functions or Vercel Cron
-- Add authentication for saved routes and alerts
-- Deploy the Next.js app on Vercel
+- Store quote snapshots in Firestore
+- Add saved routes and watchlists with Firebase Auth
+- Trigger scheduled quote refresh with Vercel Cron or Firebase Cloud Functions
+- Replace fallback adapters as partner/API access becomes available
+- Add email alerts for target exchange rates
 
 ## Data Disclaimer
 
