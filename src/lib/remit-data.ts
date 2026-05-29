@@ -66,41 +66,6 @@ export const paymentMethods: PaymentMethod[] = [
   "Wallet balance",
 ];
 
-export const countryRoutes = [
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "Vietnam",
-  },
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "India",
-  },
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "Philippines",
-  },
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "Thailand",
-  },
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "United States",
-  },
-  {
-    sendingCountry: "Ireland",
-    receivingCountry: "United Kingdom",
-  },
-  {
-    sendingCountry: "United Kingdom",
-    receivingCountry: "Vietnam",
-  },
-  {
-    sendingCountry: "United States",
-    receivingCountry: "Vietnam",
-  },
-] as const;
-
 const benchmarkRates: Record<SourceCurrency, Record<TargetCurrency, number>> = {
   EUR: {
     VND: 30658,
@@ -140,6 +105,12 @@ const benchmarkRates: Record<SourceCurrency, Record<TargetCurrency, number>> = {
   },
 };
 
+const defaultSendingCountryByCurrency: Record<SourceCurrency, string> = {
+  EUR: "Ireland",
+  GBP: "United Kingdom",
+  USD: "United States",
+};
+
 const defaultReceivingCountryByCurrency: Record<TargetCurrency, string> = {
   VND: "Vietnam",
   INR: "India",
@@ -153,6 +124,32 @@ const defaultReceivingCountryByCurrency: Record<TargetCurrency, string> = {
   JPY: "Japan",
 };
 
+export function getDefaultSendingCountry(currency: SourceCurrency) {
+  return defaultSendingCountryByCurrency[currency];
+}
+
+export function getDefaultReceivingCountry(currency: TargetCurrency) {
+  return defaultReceivingCountryByCurrency[currency];
+}
+
+export function getDefaultRouteForCurrencies(
+  sourceCurrency: SourceCurrency,
+  targetCurrency: TargetCurrency,
+) {
+  return {
+    sendingCountry: getDefaultSendingCountry(sourceCurrency),
+    receivingCountry: getDefaultReceivingCountry(targetCurrency),
+  };
+}
+
+export const countryRoutes = sourceCurrencies.flatMap((sourceCurrency) =>
+  targetCurrencies
+    .filter((targetCurrency) => targetCurrency !== sourceCurrency)
+    .map((targetCurrency) =>
+      getDefaultRouteForCurrencies(sourceCurrency, targetCurrency),
+    ),
+);
+
 export const currencyPairs: CurrencyPair[] = sourceCurrencies.flatMap(
   (sourceCurrency) =>
     targetCurrencies
@@ -160,13 +157,7 @@ export const currencyPairs: CurrencyPair[] = sourceCurrencies.flatMap(
       .map((targetCurrency) => ({
         sourceCurrency,
         targetCurrency,
-        sendingCountry:
-          sourceCurrency === "GBP"
-            ? "United Kingdom"
-            : sourceCurrency === "USD"
-              ? "United States"
-              : "Ireland",
-        receivingCountry: defaultReceivingCountryByCurrency[targetCurrency],
+        ...getDefaultRouteForCurrencies(sourceCurrency, targetCurrency),
         midMarketRate: benchmarkRates[sourceCurrency][targetCurrency],
       })),
 );

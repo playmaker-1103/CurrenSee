@@ -21,8 +21,10 @@ The app does not move money, hold balances, or initiate transfers. It is a compa
 - Provider ranking by recipient payout, fee, speed, freshness, and reliability
 - Fee breakdown with effective rate, hidden FX cost, and spread against benchmark rate
 - Data quality labels: `Live API`, `Cached adapter`, `Partner access required`, and `Manual bank table`
-- Watchlist UI prepared for future Firebase alerts
+- Recent comparison history saved locally in the browser
+- Local target-rate watchlist that can later sync to Firebase
 - Responsive dashboard UI built for desktop and mobile
+- Unit tests for quote ranking, fee calculations, history, and watchlist logic
 
 ## Architecture
 
@@ -84,13 +86,14 @@ REVOLUT_API_BASE_URL=https://b2b.revolut.com/api/1.0
 ```bash
 npm run dev
 npm run lint
+npm run test
 npm run build
 ```
 
 ## Future Work
 
-- Store quote snapshots in Firestore
-- Add saved routes and watchlists with Firebase Auth
+- Sync quote snapshots to Firestore
+- Add Firebase Auth for saved routes across devices
 - Trigger scheduled quote refresh with Vercel Cron or Firebase Cloud Functions
 - Replace fallback adapters as partner/API access becomes available
 - Add email alerts for target exchange rates

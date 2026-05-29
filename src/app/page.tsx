@@ -5,9 +5,11 @@ import {
   BadgeCheck,
   Banknote,
   Bell,
+  BookmarkPlus,
   Clock3,
   Database,
   ExternalLink,
+  History,
   LineChart,
   RefreshCw,
   Search,
@@ -16,11 +18,14 @@ import {
   Sparkles,
   TrendingUp,
   TriangleAlert,
+  Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   countryRoutes,
   getAvailableTargetCurrencies,
+  getDefaultRouteForCurrencies,
   getDefaultTargetCurrency,
   paymentMethods,
   providers,
@@ -39,13 +44,49 @@ import {
   type QuoteRequest,
 } from "@/lib/remit-calculations";
 import type { QuoteApiResponse } from "@/lib/quote-api";
+import {
+  createQuoteHistoryItem,
+  createWatchlistRule,
+  upsertQuoteHistory,
+  upsertWatchlist,
+  type QuoteHistoryItem,
+  type WatchlistRule,
+} from "@/lib/saved-comparisons";
 
-const routeOptions = countryRoutes.map(
-  (route) => `${route.sendingCountry} -> ${route.receivingCountry}`,
-);
+function formatRouteOption(route: {
+  sendingCountry: string;
+  receivingCountry: string;
+}) {
+  return `${route.sendingCountry} -> ${route.receivingCountry}`;
+}
+
+const routeOptions = countryRoutes.map(formatRouteOption);
+const historyStorageKey = "currensee:quote-history";
+const watchlistStorageKey = "currensee:watchlist";
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function readLocalList<T>(key: string): T[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? "[]");
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalList<T>(key: string, items: T[]) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(items));
+  } catch {
+    // Local storage can fail in private browsing; the dashboard still works.
+  }
 }
 
 function statusClass(status: CalculatedQuote["freshnessStatus"]) {
@@ -77,6 +118,15 @@ function formatSyncTime(dateText: string) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+  }).format(new Date(dateText));
+}
+
+function formatSnapshotTime(dateText: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(dateText));
 }
 
@@ -588,32 +638,103 @@ function TrendPanel({
   );
 }
 
-function AlertPanel({
+function RecentComparisonsPanel({
+  items,
+  onApply,
+  onClear,
+}: {
+  items: QuoteHistoryItem[];
+  onApply: (item: QuoteHistoryItem) => void;
+  onClear: () => void;
+}) {
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-950">
+            Recent comparisons
+          </h2>
+          <p className="text-sm text-zinc-500">
+            Latest quote snapshots saved on this device.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={items.length === 0}
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-sm transition hover:border-rose-300 hover:text-rose-700 focus:outline-none focus:ring-4 focus:ring-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Trash2 size={16} aria-hidden="true" />
+          Clear
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {items.length === 0 ? (
+          <div className="flex min-h-24 items-center gap-3 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-4 text-sm font-medium text-zinc-500">
+            <History size={18} aria-hidden="true" />
+            Saved comparisons will appear after the first quote refresh.
+          </div>
+        ) : (
+          items.map((item) => (
+            <article
+              key={item.id}
+              className="grid gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+            >
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-zinc-950">
+                    {item.sourceCurrency} to {item.targetCurrency}
+                  </span>
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                    {formatSnapshotTime(item.savedAt)}
+                  </span>
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                    {item.sourceSummary.live} live
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-zinc-600">
+                  {formatCurrency(item.amount, item.sourceCurrency)} via{" "}
+                  {item.paymentMethod} from {item.sendingCountry} to{" "}
+                  {item.receivingCountry}
+                </p>
+                <p className="mt-1 text-sm font-semibold text-zinc-950">
+                  {item.bestProviderName}:{" "}
+                  {formatCurrency(item.recipientAmount, item.targetCurrency)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onApply(item)}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-zinc-950 px-4 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-4 focus:ring-zinc-200"
+              >
+                <RefreshCw size={15} aria-hidden="true" />
+                Load
+              </button>
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WatchlistPanel({
+  rules,
+  bestQuote,
   sourceCurrency,
   targetCurrency,
-  bestQuote,
+  onAddRule,
+  onRemoveRule,
 }: {
+  rules: WatchlistRule[];
+  bestQuote: CalculatedQuote;
   sourceCurrency: SourceCurrency;
   targetCurrency: TargetCurrency;
-  bestQuote: CalculatedQuote;
+  onAddRule: () => void;
+  onRemoveRule: (id: string) => void;
 }) {
-  const alerts = [
-    {
-      title: "Target payout watch",
-      description: `Notify when ${sourceCurrency} -> ${targetCurrency} beats ${formatRate(bestQuote.rate + 80, targetCurrency)}.`,
-      status: "Armed",
-    },
-    {
-      title: "Provider advantage",
-      description: `Notify when Wise is at least ${formatCurrency(150000, targetCurrency)} better than Revolut.`,
-      status: "Draft",
-    },
-    {
-      title: "Bank fee monitor",
-      description: "Flag Irish bank options when total fees fall below 10 EUR.",
-      status: "Draft",
-    },
-  ];
+  const previewRate = bestQuote.rate * 1.005;
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
@@ -621,35 +742,80 @@ function AlertPanel({
         <div>
           <h2 className="text-lg font-semibold text-zinc-950">Watchlist</h2>
           <p className="text-sm text-zinc-500">
-            Alert rules ready for Firebase Cloud Functions later.
+            Local target-rate rules for saved transfer corridors.
           </p>
         </div>
         <button
           type="button"
+          onClick={onAddRule}
           className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-sm transition hover:border-emerald-400 hover:text-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-100"
         >
-          <Bell size={16} aria-hidden="true" />
-          Add alert
+          <BookmarkPlus size={16} aria-hidden="true" />
+          Track rate
         </button>
       </div>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-3">
-        {alerts.map((alert) => (
-          <article
-            key={alert.title}
-            className="min-h-36 rounded-lg border border-zinc-200 bg-zinc-50 p-4"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="font-semibold text-zinc-950">{alert.title}</h3>
-              <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
-                {alert.status}
-              </span>
+        <article className="min-h-36 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-emerald-950">
+              Current target
+            </h3>
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              Suggested
+            </span>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-emerald-800">
+            Track {sourceCurrency} to {targetCurrency} when the rate reaches{" "}
+            {formatRate(previewRate, targetCurrency)}.
+          </p>
+        </article>
+
+        {rules.length === 0 ? (
+          <article className="min-h-36 rounded-lg border border-dashed border-zinc-300 bg-zinc-50 p-4 lg:col-span-2">
+            <div className="flex items-center gap-2 font-semibold text-zinc-950">
+              <Bell size={17} aria-hidden="true" />
+              No watched routes yet
             </div>
             <p className="mt-3 text-sm leading-6 text-zinc-600">
-              {alert.description}
+              Saved rate rules will stay in this browser until Firebase sync is
+              added.
             </p>
           </article>
-        ))}
+        ) : (
+          rules.map((rule) => (
+            <article
+              key={rule.id}
+              className="min-h-36 rounded-lg border border-zinc-200 bg-zinc-50 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-semibold text-zinc-950">
+                    {rule.sourceCurrency} to {rule.targetCurrency}
+                  </h3>
+                  <p className="mt-1 text-xs font-semibold text-zinc-500">
+                    {formatSnapshotTime(rule.createdAt)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Remove watchlist rule"
+                  onClick={() => onRemoveRule(rule.id)}
+                  className="flex size-8 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 transition hover:border-rose-300 hover:text-rose-700 focus:outline-none focus:ring-4 focus:ring-rose-100"
+                >
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-zinc-600">
+                Watch {rule.providerName} until 1 {rule.sourceCurrency} reaches{" "}
+                {formatRate(rule.targetRate, rule.targetCurrency)}.
+              </p>
+              <span className="mt-3 inline-flex rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-zinc-600">
+                {rule.status}
+              </span>
+            </article>
+          ))
+        )}
       </div>
     </section>
   );
@@ -659,7 +825,9 @@ export default function Home() {
   const [amountInput, setAmountInput] = useState("1000");
   const [sourceCurrency, setSourceCurrency] = useState<SourceCurrency>("EUR");
   const [targetCurrency, setTargetCurrency] = useState<TargetCurrency>("VND");
-  const [route, setRoute] = useState(routeOptions[0]);
+  const [route, setRoute] = useState(
+    formatRouteOption(getDefaultRouteForCurrencies("EUR", "VND")),
+  );
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("Bank transfer");
   const [selectedProviderId, setSelectedProviderId] = useState("remitly");
@@ -678,6 +846,8 @@ export default function Home() {
     fallback: providers.length,
     errors: [] as string[],
   });
+  const [historyItems, setHistoryItems] = useState<QuoteHistoryItem[]>([]);
+  const [watchlistRules, setWatchlistRules] = useState<WatchlistRule[]>([]);
 
   const [sendingCountry, receivingCountry] = route.split(" -> ");
   const amount = useMemo(() => Number(amountInput) || 0, [amountInput]);
@@ -732,6 +902,24 @@ export default function Home() {
         setLiveBenchmarkRate(data.benchmarkRate);
         setSourceSummary(data.sourceSummary);
         setLastSync(formatSyncTime(data.fetchedAt));
+        if (data.quotes[0]) {
+          const historyItem = createQuoteHistoryItem(
+            data.request,
+            data.quotes[0],
+            data.sourceSummary,
+            data.fetchedAt,
+          );
+
+          setHistoryItems((currentItems) => {
+            const baseItems =
+              currentItems.length > 0
+                ? currentItems
+                : readLocalList<QuoteHistoryItem>(historyStorageKey);
+            const nextItems = upsertQuoteHistory(baseItems, historyItem);
+            writeLocalList(historyStorageKey, nextItems);
+            return nextItems;
+          });
+        }
         setQuoteStatus("ready");
       } catch (error) {
         if (controller.signal.aborted) {
@@ -749,6 +937,23 @@ export default function Home() {
 
     return () => controller.abort();
   }, [request, refreshNonce]);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.resolve().then(() => {
+      if (!active) {
+        return;
+      }
+
+      setHistoryItems(readLocalList<QuoteHistoryItem>(historyStorageKey));
+      setWatchlistRules(readLocalList<WatchlistRule>(watchlistStorageKey));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const fallbackQuotes = useMemo(() => rankQuotes(providers, request), [request]);
   const quotes = apiQuotes ?? fallbackQuotes;
@@ -772,13 +977,75 @@ export default function Home() {
     () => getAvailableTargetCurrencies(sourceCurrency),
     [sourceCurrency],
   );
+
   const handleSourceCurrencyChange = (value: string) => {
     const nextSourceCurrency = value as SourceCurrency;
-    setSourceCurrency(nextSourceCurrency);
+    const nextTargetCurrency =
+      targetCurrency === nextSourceCurrency
+        ? getDefaultTargetCurrency(nextSourceCurrency)
+        : targetCurrency;
 
-    if (targetCurrency === nextSourceCurrency) {
-      setTargetCurrency(getDefaultTargetCurrency(nextSourceCurrency));
-    }
+    setSourceCurrency(nextSourceCurrency);
+    setTargetCurrency(nextTargetCurrency);
+    setRoute(
+      formatRouteOption(
+        getDefaultRouteForCurrencies(nextSourceCurrency, nextTargetCurrency),
+      ),
+    );
+  };
+
+  const handleTargetCurrencyChange = (value: string) => {
+    const nextTargetCurrency = value as TargetCurrency;
+    setTargetCurrency(nextTargetCurrency);
+    setRoute(
+      formatRouteOption(
+        getDefaultRouteForCurrencies(sourceCurrency, nextTargetCurrency),
+      ),
+    );
+  };
+
+  const handleApplyHistory = (item: QuoteHistoryItem) => {
+    const savedRoute = formatRouteOption({
+      sendingCountry: item.sendingCountry,
+      receivingCountry: item.receivingCountry,
+    });
+
+    setAmountInput(normalizeAmountInput(String(item.amount)));
+    setSourceCurrency(item.sourceCurrency);
+    setTargetCurrency(item.targetCurrency);
+    setRoute(
+      routeOptions.includes(savedRoute)
+        ? savedRoute
+        : formatRouteOption(
+            getDefaultRouteForCurrencies(item.sourceCurrency, item.targetCurrency),
+          ),
+    );
+    setPaymentMethod(item.paymentMethod);
+    setSelectedProviderId(item.bestProviderId);
+    setRefreshNonce((value) => value + 1);
+  };
+
+  const handleClearHistory = () => {
+    setHistoryItems([]);
+    writeLocalList(historyStorageKey, []);
+  };
+
+  const handleAddWatchRule = () => {
+    const rule = createWatchlistRule(request, bestQuote);
+
+    setWatchlistRules((currentRules) => {
+      const nextRules = upsertWatchlist(currentRules, rule);
+      writeLocalList(watchlistStorageKey, nextRules);
+      return nextRules;
+    });
+  };
+
+  const handleRemoveWatchRule = (id: string) => {
+    setWatchlistRules((currentRules) => {
+      const nextRules = currentRules.filter((rule) => rule.id !== id);
+      writeLocalList(watchlistStorageKey, nextRules);
+      return nextRules;
+    });
   };
   const sourceLabel =
     quoteStatus === "loading"
@@ -878,7 +1145,7 @@ export default function Home() {
             <SelectField
               label="To"
               value={targetCurrency}
-              onChange={(value) => setTargetCurrency(value as TargetCurrency)}
+              onChange={handleTargetCurrencyChange}
               options={availableTargetCurrencies}
             />
             <SelectField
@@ -1027,10 +1294,19 @@ export default function Home() {
           </section>
         </section>
 
-        <AlertPanel
+        <RecentComparisonsPanel
+          items={historyItems}
+          onApply={handleApplyHistory}
+          onClear={handleClearHistory}
+        />
+
+        <WatchlistPanel
+          rules={watchlistRules}
           sourceCurrency={sourceCurrency}
           targetCurrency={targetCurrency}
           bestQuote={bestQuote}
+          onAddRule={handleAddWatchRule}
+          onRemoveRule={handleRemoveWatchRule}
         />
       </div>
     </main>
