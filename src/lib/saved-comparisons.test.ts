@@ -6,8 +6,11 @@ import {
 import { rankQuotes, type QuoteRequest } from "./remit-calculations";
 import {
   createQuoteHistoryItem,
+  createQuoteSnapshots,
   createWatchlistRule,
+  getProviderTrendSnapshots,
   upsertQuoteHistory,
+  upsertQuoteSnapshots,
   upsertWatchlist,
 } from "./saved-comparisons";
 
@@ -68,5 +71,85 @@ describe("saved comparisons", () => {
 
     expect(firstRule.targetRate).toBeGreaterThan(bestQuote.rate);
     expect(upsertWatchlist([firstRule], latestRule)).toEqual([latestRule]);
+  });
+
+  it("creates one historical snapshot per provider quote", () => {
+    const quotes = rankQuotes(providers, request);
+    const snapshots = createQuoteSnapshots(
+      request,
+      quotes,
+      quotes[0].midMarketRate,
+      { live: 1, fallback: 6 },
+      "2026-05-29T12:00:00.000Z",
+    );
+
+    expect(snapshots).toHaveLength(providers.length);
+    expect(snapshots[0]).toMatchObject({
+      providerId: quotes[0].provider.id,
+      rate: quotes[0].rate,
+      benchmarkRate: quotes[0].midMarketRate,
+      sourceCurrency: "EUR",
+      targetCurrency: "VND",
+    });
+  });
+
+  it("stores unique quote snapshots newest-first with a limit", () => {
+    const quotes = rankQuotes(providers, request);
+    const olderSnapshots = createQuoteSnapshots(
+      request,
+      quotes,
+      quotes[0].midMarketRate,
+      { live: 0, fallback: 7 },
+      "2026-05-29T11:00:00.000Z",
+    );
+    const newerSnapshots = createQuoteSnapshots(
+      request,
+      quotes,
+      quotes[0].midMarketRate,
+      { live: 1, fallback: 6 },
+      "2026-05-29T12:00:00.000Z",
+    );
+
+    const stored = upsertQuoteSnapshots(
+      [...olderSnapshots, ...newerSnapshots],
+      newerSnapshots,
+      8,
+    );
+
+    expect(stored).toHaveLength(8);
+    expect(stored[0].capturedAt).toBe("2026-05-29T12:00:00.000Z");
+  });
+
+  it("returns provider trend snapshots for the active corridor", () => {
+    const quotes = rankQuotes(providers, request);
+    const wiseQuote = quotes.find((quote) => quote.provider.id === "wise");
+
+    expect(wiseQuote).toBeDefined();
+
+    const stored = [
+      ...createQuoteSnapshots(
+        request,
+        quotes,
+        quotes[0].midMarketRate,
+        { live: 1, fallback: 6 },
+        "2026-05-29T11:00:00.000Z",
+      ),
+      ...createQuoteSnapshots(
+        request,
+        quotes,
+        quotes[0].midMarketRate,
+        { live: 1, fallback: 6 },
+        "2026-05-29T12:00:00.000Z",
+      ),
+    ];
+
+    const trend = getProviderTrendSnapshots(stored, request, "wise");
+
+    expect(trend).toHaveLength(2);
+    expect(trend.map((snapshot) => snapshot.providerId)).toEqual([
+      "wise",
+      "wise",
+    ]);
+    expect(trend[0].capturedAt).toBe("2026-05-29T11:00:00.000Z");
   });
 });

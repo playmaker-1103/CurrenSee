@@ -22,9 +22,11 @@ The app does not move money, hold balances, or initiate transfers. It is a compa
 - Fee breakdown with effective rate, hidden FX cost, and spread against benchmark rate
 - Data quality labels: `Live API`, `Cached adapter`, `Partner access required`, and `Manual bank table`
 - Recent comparison history saved locally in the browser
+- Historical quote snapshots captured on successful refreshes
+- Real trend chart powered by stored provider snapshots
 - Local target-rate watchlist that can later sync to Firebase
 - Responsive dashboard UI built for desktop and mobile
-- Unit tests for quote ranking, fee calculations, history, and watchlist logic
+- Unit tests for quote ranking, fee calculations, history, snapshots, and watchlist logic
 
 ## Architecture
 
@@ -92,7 +94,7 @@ npm run build
 
 ## Future Work
 
-- Sync quote snapshots to Firestore
+- Sync historical quote snapshots to Firestore
 - Add Firebase Auth for saved routes across devices
 - Trigger scheduled quote refresh with Vercel Cron or Firebase Cloud Functions
 - Replace fallback adapters as partner/API access becomes available

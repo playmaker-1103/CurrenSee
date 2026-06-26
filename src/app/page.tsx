@@ -46,10 +46,14 @@ import {
 import type { QuoteApiResponse } from "@/lib/quote-api";
 import {
   createQuoteHistoryItem,
+  createQuoteSnapshots,
+  getProviderTrendSnapshots,
   createWatchlistRule,
   upsertQuoteHistory,
+  upsertQuoteSnapshots,
   upsertWatchlist,
   type QuoteHistoryItem,
+  type QuoteSnapshot,
   type WatchlistRule,
 } from "@/lib/saved-comparisons";
 
@@ -62,6 +66,7 @@ function formatRouteOption(route: {
 
 const routeOptions = countryRoutes.map(formatRouteOption);
 const historyStorageKey = "currensee:quote-history";
+const snapshotStorageKey = "currensee:quote-snapshots";
 const watchlistStorageKey = "currensee:watchlist";
 const panelClass =
   "rounded-2xl border border-zinc-200/80 bg-white/90 shadow-[0_18px_60px_rgba(24,24,27,0.07)] backdrop-blur dark:border-white/10 dark:bg-zinc-950/82 dark:shadow-none";
@@ -138,6 +143,13 @@ function formatSnapshotTime(dateText: string) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(dateText));
+}
+
+function formatTrendTime(dateText: string) {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(dateText));
@@ -596,22 +608,23 @@ function ProviderBars({
 function TrendPanel({
   sourceCurrency,
   targetCurrency,
-  benchmarkRate,
+  providerName,
+  snapshots,
 }: {
   sourceCurrency: SourceCurrency;
   targetCurrency: TargetCurrency;
-  benchmarkRate: number;
+  providerName: string;
+  snapshots: QuoteSnapshot[];
 }) {
-  const trend = [
-    { label: "Mon", rate: benchmarkRate * 0.991 },
-    { label: "Tue", rate: benchmarkRate * 0.995 },
-    { label: "Wed", rate: benchmarkRate * 0.998 },
-    { label: "Thu", rate: benchmarkRate * 1.001 },
-    { label: "Fri", rate: benchmarkRate },
-  ];
-  const values = trend.map((item) => item.rate);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const values = snapshots.map((snapshot) => snapshot.rate);
+  const min = values.length > 0 ? Math.min(...values) : 0;
+  const max = values.length > 0 ? Math.max(...values) : 0;
+  const latestSnapshot = snapshots[snapshots.length - 1];
+  const firstSnapshot = snapshots[0];
+  const rateMove =
+    latestSnapshot && firstSnapshot
+      ? latestSnapshot.rate - firstSnapshot.rate
+      : 0;
 
   return (
     <section className={cx(panelClass, "p-5")}>
@@ -621,37 +634,86 @@ function TrendPanel({
             Rate trend
           </h2>
           <p className={cx("text-sm", mutedTextClass)}>
-            Five-day reference trend for {sourceCurrency} to {targetCurrency}.
+            Stored snapshots for {providerName} on {sourceCurrency} to{" "}
+            {targetCurrency}.
           </p>
         </div>
         <TrendingUp className="text-emerald-600 dark:text-emerald-300" size={22} aria-hidden="true" />
       </div>
 
-      <div className="mt-6 grid min-h-56 grid-cols-5 items-end gap-3">
-        {trend.map((day) => {
-          const height = ((day.rate - min) / (max - min || 1)) * 100;
-
-          return (
-            <div key={day.label} className="grid gap-2">
-              <div className="flex h-40 items-end rounded-xl bg-zinc-50 p-2 dark:bg-white/[0.04]">
-                <div
-                  className="w-full rounded-md bg-emerald-600 dark:bg-emerald-400"
-                  style={{ height: `${Math.max(height, 16)}%` }}
-                  aria-label={`${day.label} rate ${day.rate}`}
-                />
-              </div>
-              <div className="text-center">
-                <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                  {day.label}
-                </p>
-                <p className={cx("text-xs", mutedTextClass)}>
-                  {formatNumber(day.rate)}
-                </p>
-              </div>
+      {snapshots.length === 0 ? (
+        <div className="mt-6 flex min-h-56 items-center rounded-xl border border-dashed border-zinc-300 bg-zinc-50/80 p-4 text-sm text-zinc-500 dark:border-white/15 dark:bg-white/[0.04] dark:text-zinc-400">
+          Historical snapshots will appear after the next successful quote
+          refresh.
+        </div>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className={cx(insetPanelClass, "p-3")}>
+              <p className={cx("text-xs font-semibold", mutedTextClass)}>
+                Latest rate
+              </p>
+              <p className={cx("mt-1 text-lg font-semibold", strongTextClass)}>
+                {formatRate(latestSnapshot!.rate, targetCurrency)}
+              </p>
             </div>
-          );
-        })}
-      </div>
+            <div className={cx(insetPanelClass, "p-3")}>
+              <p className={cx("text-xs font-semibold", mutedTextClass)}>
+                Window move
+              </p>
+              <p
+                className={cx(
+                  "mt-1 text-lg font-semibold",
+                  rateMove >= 0
+                    ? "text-emerald-700 dark:text-emerald-300"
+                    : "text-rose-700 dark:text-rose-300",
+                )}
+              >
+                {rateMove >= 0 ? "+" : ""}
+                {formatRate(rateMove, targetCurrency)}
+              </p>
+            </div>
+          </div>
+
+          <div
+            className="mt-5 grid min-h-48 items-end gap-3"
+            style={{
+              gridTemplateColumns: `repeat(${snapshots.length}, minmax(0, 1fr))`,
+            }}
+          >
+            {snapshots.map((snapshot) => {
+              const height =
+                max > min ? ((snapshot.rate - min) / (max - min)) * 100 : 72;
+
+              return (
+                <div key={snapshot.id} className="grid gap-2">
+                  <div className="flex h-36 items-end rounded-xl bg-zinc-50 p-2 dark:bg-white/[0.04]">
+                    <div
+                      className="w-full rounded-md bg-emerald-600 dark:bg-emerald-400"
+                      style={{ height: `${Math.max(height, 18)}%` }}
+                      aria-label={`${formatTrendTime(snapshot.capturedAt)} rate ${snapshot.rate}`}
+                    />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                      {formatTrendTime(snapshot.capturedAt)}
+                    </p>
+                    <p className={cx("text-xs", mutedTextClass)}>
+                      {formatNumber(snapshot.rate)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className={cx("mt-4 text-xs", mutedTextClass)}>
+            {snapshots.length} stored snapshot
+            {snapshots.length === 1 ? "" : "s"}. Refresh quotes to extend this
+            local history.
+          </p>
+        </>
+      )}
     </section>
   );
 }
@@ -870,6 +932,7 @@ export default function Home() {
     errors: [] as string[],
   });
   const [historyItems, setHistoryItems] = useState<QuoteHistoryItem[]>([]);
+  const [quoteSnapshots, setQuoteSnapshots] = useState<QuoteSnapshot[]>([]);
   const [watchlistRules, setWatchlistRules] = useState<WatchlistRule[]>([]);
 
   const [sendingCountry, receivingCountry] = route.split(" -> ");
@@ -942,6 +1005,27 @@ export default function Home() {
             writeLocalList(historyStorageKey, nextItems);
             return nextItems;
           });
+
+          const snapshots = createQuoteSnapshots(
+            data.request,
+            data.quotes,
+            data.benchmarkRate,
+            data.sourceSummary,
+            data.fetchedAt,
+          );
+
+          setQuoteSnapshots((currentSnapshots) => {
+            const baseSnapshots =
+              currentSnapshots.length > 0
+                ? currentSnapshots
+                : readLocalList<QuoteSnapshot>(snapshotStorageKey);
+            const nextSnapshots = upsertQuoteSnapshots(
+              baseSnapshots,
+              snapshots,
+            );
+            writeLocalList(snapshotStorageKey, nextSnapshots);
+            return nextSnapshots;
+          });
         }
         setQuoteStatus("ready");
       } catch (error) {
@@ -970,6 +1054,7 @@ export default function Home() {
       }
 
       setHistoryItems(readLocalList<QuoteHistoryItem>(historyStorageKey));
+      setQuoteSnapshots(readLocalList<QuoteSnapshot>(snapshotStorageKey));
       setWatchlistRules(readLocalList<WatchlistRule>(watchlistStorageKey));
     });
 
@@ -999,6 +1084,15 @@ export default function Home() {
   const availableTargetCurrencies = useMemo(
     () => getAvailableTargetCurrencies(sourceCurrency),
     [sourceCurrency],
+  );
+  const selectedProviderTrend = useMemo(
+    () =>
+      getProviderTrendSnapshots(
+        quoteSnapshots,
+        request,
+        selectedQuote.provider.id,
+      ),
+    [quoteSnapshots, request, selectedQuote.provider.id],
   );
 
   const handleSourceCurrencyChange = (value: string) => {
@@ -1281,7 +1375,8 @@ export default function Home() {
           <TrendPanel
             sourceCurrency={sourceCurrency}
             targetCurrency={targetCurrency}
-            benchmarkRate={benchmarkRate}
+            providerName={selectedQuote.provider.name}
+            snapshots={selectedProviderTrend}
           />
 
           <section className={cx(panelClass, "p-5")}>

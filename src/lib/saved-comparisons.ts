@@ -34,6 +34,19 @@ export type WatchlistRule = Pick<
   status: "Watching";
 };
 
+export type QuoteSnapshot = QuoteRequest & {
+  id: string;
+  providerId: string;
+  providerName: string;
+  providerSourceType: string;
+  rate: number;
+  recipientAmount: number;
+  feeAmount: number;
+  benchmarkRate: number;
+  capturedAt: string;
+  sourceSummary: QuoteSourceSummary;
+};
+
 const zeroDecimalTargets = new Set(["VND", "JPY"]);
 
 function comparisonSignature(
@@ -54,6 +67,16 @@ function comparisonSignature(
     item.sendingCountry,
     item.receivingCountry,
     item.paymentMethod,
+  ].join(":");
+}
+
+function snapshotSignature(snapshot: QuoteSnapshot) {
+  return [
+    snapshot.providerId,
+    snapshot.sourceCurrency,
+    snapshot.targetCurrency,
+    snapshot.paymentMethod,
+    snapshot.capturedAt,
   ].join(":");
 }
 
@@ -94,6 +117,83 @@ export function upsertQuoteHistory(
       (a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(),
     )
     .slice(0, limit);
+}
+
+export function createQuoteSnapshots(
+  request: QuoteRequest,
+  quotes: CalculatedQuote[],
+  benchmarkRate: number,
+  sourceSummary: QuoteSourceSummary,
+  capturedAt = new Date().toISOString(),
+): QuoteSnapshot[] {
+  return quotes.map((quote) => ({
+    ...request,
+    id: [
+      quote.provider.id,
+      request.sourceCurrency,
+      request.targetCurrency,
+      request.paymentMethod,
+      capturedAt,
+    ].join(":"),
+    providerId: quote.provider.id,
+    providerName: quote.provider.name,
+    providerSourceType: quote.provider.sourceType,
+    rate: quote.rate,
+    recipientAmount: quote.recipientAmount,
+    feeAmount: quote.feeAmount,
+    benchmarkRate,
+    capturedAt,
+    sourceSummary,
+  }));
+}
+
+export function upsertQuoteSnapshots(
+  snapshots: QuoteSnapshot[],
+  nextSnapshots: QuoteSnapshot[],
+  limit = 96,
+) {
+  const seen = new Set<string>();
+
+  return [...nextSnapshots, ...snapshots]
+    .filter((snapshot) => {
+      const signature = snapshotSignature(snapshot);
+
+      if (seen.has(signature)) {
+        return false;
+      }
+
+      seen.add(signature);
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime(),
+    )
+    .slice(0, limit);
+}
+
+export function getProviderTrendSnapshots(
+  snapshots: QuoteSnapshot[],
+  request: Pick<
+    QuoteRequest,
+    "sourceCurrency" | "targetCurrency" | "paymentMethod"
+  >,
+  providerId: string,
+  limit = 8,
+) {
+  return snapshots
+    .filter(
+      (snapshot) =>
+        snapshot.providerId === providerId &&
+        snapshot.sourceCurrency === request.sourceCurrency &&
+        snapshot.targetCurrency === request.targetCurrency &&
+        snapshot.paymentMethod === request.paymentMethod,
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime(),
+    )
+    .slice(-limit);
 }
 
 export function createWatchlistRule(
